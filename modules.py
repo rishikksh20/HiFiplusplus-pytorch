@@ -168,3 +168,88 @@ class WaveUnet(nn.Module):
     up1 = self.up1(up2, skip1)
 
     return self.output(up1)
+
+
+class SpectralMaskNet(nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1d = nn.Conv1d(80, 513, 1)
+        self.spectralunet = SpectralUnet(1, 1)
+
+    def forward(self, x, m):
+        mag, phase, _, _ = self.stft(x)
+        print(m.shape)
+        m = self.conv1d(m)
+        print(m.shape)
+        inp = torch.cat([mag, m.unsqueeze(1)], dim=2)
+        print(inp.shape)
+        mul = F.softplus(self.spectralunet(inp))
+        mag_ = mag * mul
+        out = self.istft((mag_, phase))
+        return out
+
+    def stft(self, y, n_fft=1024, hop_length=256, win_length=1024):
+        """
+        Wrapper of the official torch.stft for single-channel and multi-channel
+        Args:
+            y: single- or multi-channel speech with shape of [B, C, T] or [B, T]
+            n_fft: num of FFT
+            hop_length: hop length
+            win_length: hanning window size
+        Shapes:
+            mag: [B, F, T] if dims of input is [B, T], whereas [B, C, F, T] if dims of input is [B, C, T]
+        Returns:
+            mag, phase, real and imag with the same shape of [B, F, T] (**complex-valued** STFT coefficients)
+        """
+        num_dims = y.dim()
+        assert num_dims == 2 or num_dims == 3, "Only support 2D or 3D Input"
+
+        batch_size = y.shape[0]
+        num_samples = y.shape[-1]
+
+        if num_dims == 3:
+            y = y.reshape(-1, num_samples)
+
+        complex_stft = torch.stft(y, n_fft, hop_length, win_length, window=torch.hann_window(n_fft, device=y.device),
+                                  return_complex=True)
+        _, num_freqs, num_frames = complex_stft.shape
+
+        if num_dims == 3:
+            complex_stft = complex_stft.reshape(batch_size, -1, num_freqs, num_frames)
+
+        mag, phase = torch.abs(complex_stft), torch.angle(complex_stft)
+        real, imag = complex_stft.real, complex_stft.imag
+        return mag, phase, real, imag
+
+    def istft(self, features, n_fft=1024, hop_length=256, win_length=1024, length=None, input_type="mag_phase"):
+        """
+        Wrapper of the official torch.istft
+        Args:
+            features: [B, F, T] (complex) or ([B, F, T], [B, F, T]) (mag and phase)
+            n_fft: num of FFT
+            hop_length: hop length
+            win_length: hanning window size
+            length: expected length of istft
+            use_mag_phase: use mag and phase as the input ("features")
+        Returns:
+            single-channel speech of shape [B, T]
+        """
+        if input_type == "real_imag":
+            # the feature is (real, imag) or [real, imag]
+            assert isinstance(features, tuple) or isinstance(features, list)
+            real, imag = features
+            features = torch.complex(real, imag)
+        elif input_type == "complex":
+            assert isinstance(features, torch.ComplexType)
+        elif input_type == "mag_phase":
+            # the feature is (mag, phase) or [mag, phase]
+            assert isinstance(features, tuple) or isinstance(features, list)
+            mag, phase = features
+            features = torch.complex(mag * torch.cos(phase), mag * torch.sin(phase))
+        else:
+            raise NotImplementedError("Only 'real_imag', 'complex', and 'mag_phase' are supported")
+
+        return torch.istft(features, n_fft, hop_length, win_length,
+                           window=torch.hann_window(n_fft, device=features.device),
+                           length=length)
