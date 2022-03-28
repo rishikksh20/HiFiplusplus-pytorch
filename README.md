@@ -1,6 +1,12 @@
 # HiFi++ : a Unified Framework for Neural Vocoding, Bandwidth Extension and Speech Enhancement
+This is the unofficial implementation of Vocoder part of [HiFi++ : a Unified Framework for Neural Vocoding, Bandwidth Extension and Speech Enhancement](https://arxiv.org/abs/2203.13086).
+![](hifiplusplus.png)
 
-## Work In Progress
+* Currently, this repo is WIP but you can start your training without any error. 
+## Training:
+```
+python train.py --config config_v2.json
+```
 
 
 ## Citations:
@@ -24,4 +30,8 @@
 }
 
 ```
+
+
+## References:
+* https://github.com/jik876/hifi-gan
 
