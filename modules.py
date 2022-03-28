@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from stft import STFT
 # Common modules
 
 class BlockWidth1d(nn.Module):
@@ -58,9 +58,9 @@ class Upsample1d(nn.Module):
       self.out = nn.Conv1d(width*2, width, kernel_size=1)
 
   def forward(self, x, skip):
-
     x = self.blocks(self.conv(self.upsample(x)))
-
+    diffX = skip.size()[2] - x.size()[2]
+    x = F.pad(x, [0, diffX])
     return self.out(torch.cat([x, skip], dim=1))
 
 class Downsample2d(nn.Module):
@@ -97,7 +97,13 @@ class Upsample2d(nn.Module):
   def forward(self, x, skip):
 
     x = self.blocks(self.conv(self.upsample(x)))
+    # pad `x` so that x.shape == skip.shape
+    # input is CHW
+    diffY = skip.size()[2] - x.size()[2]
+    diffX = skip.size()[3] - x.size()[3]
 
+    x = F.pad(x, [diffX // 2, diffX - diffX // 2,
+                    diffY // 2, diffY - diffY // 2])
     return self.out(torch.cat([x, skip], dim=1))
 
 
@@ -175,81 +181,15 @@ class SpectralMaskNet(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.conv1d = nn.Conv1d(80, 513, 1)
-        self.spectralunet = SpectralUnet(1, 1)
+        self.spectralunet = SpectralUnet(2, 1)
+        self.stft = STFT(1024, 256, 1024)
 
     def forward(self, x, m):
-        mag, phase, _, _ = self.stft(x)
-        print(m.shape)
+        mag, phase = self.stft.transform(x)
         m = self.conv1d(m)
-        print(m.shape)
-        inp = torch.cat([mag, m.unsqueeze(1)], dim=2)
-        print(inp.shape)
+        inp = torch.cat([mag.unsqueeze(1), m.unsqueeze(1)], dim=1)
+
         mul = F.softplus(self.spectralunet(inp))
-        mag_ = mag * mul
-        out = self.istft((mag_, phase))
+        mag_ = mag * mul.squeeze(1)
+        out = self.stft.inverse(mag_, phase)
         return out
-
-    def stft(self, y, n_fft=1024, hop_length=256, win_length=1024):
-        """
-        Wrapper of the official torch.stft for single-channel and multi-channel
-        Args:
-            y: single- or multi-channel speech with shape of [B, C, T] or [B, T]
-            n_fft: num of FFT
-            hop_length: hop length
-            win_length: hanning window size
-        Shapes:
-            mag: [B, F, T] if dims of input is [B, T], whereas [B, C, F, T] if dims of input is [B, C, T]
-        Returns:
-            mag, phase, real and imag with the same shape of [B, F, T] (**complex-valued** STFT coefficients)
-        """
-        num_dims = y.dim()
-        assert num_dims == 2 or num_dims == 3, "Only support 2D or 3D Input"
-
-        batch_size = y.shape[0]
-        num_samples = y.shape[-1]
-
-        if num_dims == 3:
-            y = y.reshape(-1, num_samples)
-
-        complex_stft = torch.stft(y, n_fft, hop_length, win_length, window=torch.hann_window(n_fft, device=y.device),
-                                  return_complex=True)
-        _, num_freqs, num_frames = complex_stft.shape
-
-        if num_dims == 3:
-            complex_stft = complex_stft.reshape(batch_size, -1, num_freqs, num_frames)
-
-        mag, phase = torch.abs(complex_stft), torch.angle(complex_stft)
-        real, imag = complex_stft.real, complex_stft.imag
-        return mag, phase, real, imag
-
-    def istft(self, features, n_fft=1024, hop_length=256, win_length=1024, length=None, input_type="mag_phase"):
-        """
-        Wrapper of the official torch.istft
-        Args:
-            features: [B, F, T] (complex) or ([B, F, T], [B, F, T]) (mag and phase)
-            n_fft: num of FFT
-            hop_length: hop length
-            win_length: hanning window size
-            length: expected length of istft
-            use_mag_phase: use mag and phase as the input ("features")
-        Returns:
-            single-channel speech of shape [B, T]
-        """
-        if input_type == "real_imag":
-            # the feature is (real, imag) or [real, imag]
-            assert isinstance(features, tuple) or isinstance(features, list)
-            real, imag = features
-            features = torch.complex(real, imag)
-        elif input_type == "complex":
-            assert isinstance(features, torch.ComplexType)
-        elif input_type == "mag_phase":
-            # the feature is (mag, phase) or [mag, phase]
-            assert isinstance(features, tuple) or isinstance(features, list)
-            mag, phase = features
-            features = torch.complex(mag * torch.cos(phase), mag * torch.sin(phase))
-        else:
-            raise NotImplementedError("Only 'real_imag', 'complex', and 'mag_phase' are supported")
-
-        return torch.istft(features, n_fft, hop_length, win_length,
-                           window=torch.hann_window(n_fft, device=features.device),
-                           length=length)
