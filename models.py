@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 from utils import init_weights, get_padding
+from modules import WaveUnet, SpectralUnet, SpectralMaskNet
 
 LRELU_SLOPE = 0.1
 
@@ -79,6 +80,11 @@ class Generator(torch.nn.Module):
         self.num_kernels = len(h.resblock_kernel_sizes)
         self.num_upsamples = len(h.upsample_rates)
         self.conv_pre = weight_norm(Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
+
+        self.specunet = SpectralUnet(1, 1)
+        self.waveunet = WaveUnet(1, 1)
+        self.specmaskunet = SpectralMaskNet()
+
         resblock = ResBlock1 if h.resblock == '1' else ResBlock2
 
         self.ups = nn.ModuleList()
@@ -98,7 +104,9 @@ class Generator(torch.nn.Module):
         self.conv_post.apply(init_weights)
 
     def forward(self, x):
-        x = self.conv_pre(x)
+
+        cond = self.specunet(x.unsqueeze(1)).squeeze(1)
+        x = self.conv_pre(cond)
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
             x = self.ups[i](x)
@@ -112,6 +120,9 @@ class Generator(torch.nn.Module):
         x = F.leaky_relu(x)
         x = self.conv_post(x)
         x = torch.tanh(x)
+
+        x = self.waveunet(x)
+        x = self.specmaskunet(x, cond)
 
         return x
 
