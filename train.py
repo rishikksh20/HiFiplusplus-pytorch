@@ -61,8 +61,7 @@ def train(rank, a, h):
         msd = DistributedDataParallel(msd, device_ids=[rank]).to(device)
 
     optim_g = torch.optim.AdamW(generator.parameters(), h.learning_rate, betas=[h.adam_b1, h.adam_b2])
-    optim_d = torch.optim.AdamW(itertools.chain(msd.parameters(), mpd.parameters()),
-                                h.learning_rate, betas=[h.adam_b1, h.adam_b2])
+    optim_d = torch.optim.AdamW(msd.parameters(), h.learning_rate, betas=[h.adam_b1, h.adam_b2])
 
     if state_dict_do is not None:
         optim_g.load_state_dict(state_dict_do['optim_g'])
@@ -150,7 +149,7 @@ def train(rank, a, h):
             loss_fm_s = feature_loss(fmap_s_r, fmap_s_g)
             #loss_gen_f, losses_gen_f = generator_loss(y_df_hat_g)
             loss_gen_s, losses_gen_s = generator_loss(y_ds_hat_g)
-            loss_gen_all = loss_gen_s + + loss_mel + 2 * loss_fm_s #+ loss_gen_f  + loss_fm_f
+            loss_gen_all = loss_gen_s + loss_mel + 2 * loss_fm_s #+ loss_gen_f  + loss_fm_f
 
             loss_gen_all.backward()
             optim_g.step()
