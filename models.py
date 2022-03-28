@@ -102,11 +102,13 @@ class Generator(torch.nn.Module):
         self.conv_post = weight_norm(Conv1d(ch, 1, 7, 1, padding=3))
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
+        self.reflection_pad = torch.nn.ReflectionPad1d((1, 0))
 
     def forward(self, x):
 
         cond = self.specunet(x.unsqueeze(1)).squeeze(1)
         x = self.conv_pre(cond)
+        cond = self.reflection_pad(cond)
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
             x = self.ups[i](x)
@@ -120,7 +122,6 @@ class Generator(torch.nn.Module):
         x = F.leaky_relu(x)
         x = self.conv_post(x)
         x = torch.tanh(x)
-
         x = self.waveunet(x)
         x = self.specmaskunet(x, cond)
 
