@@ -9,7 +9,7 @@ python train.py --config config_v2.json
 ```
 
 ## Notes:
-* iSTFTNet produces better sounding audios than HiFi++.
+* iSTFTNet (https://github.com/rishikksh20/iSTFTNet-pytorch) **produces better sounding audios than HiFi++.**
 
 ## Citations:
 ```
