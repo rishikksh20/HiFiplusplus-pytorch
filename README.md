@@ -8,6 +8,8 @@ This is the unofficial implementation of Vocoder part of [HiFi++ : a Unified Fra
 python train.py --config config_v2.json
 ```
 
+## Notes:
+* iSTFTNet produces better sounding audios than HiFi++.
 
 ## Citations:
 ```
